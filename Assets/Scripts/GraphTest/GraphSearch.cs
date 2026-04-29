@@ -253,6 +253,7 @@ public class GraphSearch
                 }
 
                 var newDistance = distances[currentNode.id] + adjacent.weight;
+                Debug.Log(newDistance);
                 if (newDistance < distances[adjacent.id])
                 {
                     distances[adjacent.id] = newDistance;
