@@ -1,33 +1,32 @@
-using Unity.VisualScripting;
+using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.UIElements;
-using static UnityEditor.PlayerSettings;
+using UnityEngine.Timeline;
+using UnityEngine.UI;
 
 public class Stage : MonoBehaviour
 {
     public GameObject tilePrefabs;
     private GameObject[] tileObjs;
-    public PlayerMovement playerPrefab;
-    private PlayerMovement player;
 
     public int mapWidth = 20;
     public int mapHeight = 20;
 
     [Range(0f, 0.9f)]
     public float erodePercent = 0.5f;
-    public int erodeIterations = 2;
+    public int erodeIteration = 2;
     [Range(0f, 0.9f)]
-    public float lakePercent = 0.5f;
+    public float lakePercent = 0.1f;
+
     [Range(0f, 0.9f)]
-    public float treePercent = 0.5f;
+    public float treePercent = 0.1f;
     [Range(0f, 0.9f)]
-    public float hillPercent = 0.5f;
+    public float hillPercent = 0.1f;
     [Range(0f, 0.9f)]
-    public float mountainPercent = 0.5f;
+    public float moutainPercent = 0.1f;
     [Range(0f, 0.9f)]
-    public float townPercent = 0.5f;
+    public float townPercent = 0.1f;
     [Range(0f, 0.9f)]
-    public float monsterPercent = 0.5f;
+    public float monsterPercent = 0.1f;
 
     public Vector2 tileSize = new Vector2(16, 16);
 
@@ -35,73 +34,40 @@ public class Stage : MonoBehaviour
     public Sprite[] fowSprites;
 
     private Map map;
-    private Camera cam;
-    private Graph graph;
+
+    public Map Map => map;
+
+    private Camera mainCamera;
+
+    public PlayerMovemnet playerPrefab;
+    private PlayerMovemnet player;    
+
 
     private Vector3 FirstTilePos
     {
         get
         {
-            var x = transform.position.x - mapWidth * tileSize.x / 2;
-            var y = transform.position.y + mapHeight * tileSize.y / 2;
-            var z = transform.position.z;
-
-            return new Vector3(x, y, z);
+            var pos = transform.position;
+            pos.x -= mapWidth * tileSize.x * 0.5f;
+            pos.y += mapHeight * tileSize.y * 0.5f;
+            pos.x += tileSize.x * 0.5f;
+            pos.y -= tileSize.y * 0.5f;
+            return pos;
         }
     }
 
-    public Map Map => map;
+    private int prevTileId = -1;
 
-    private void Awake()
+    private void Start()
     {
-        cam = Camera.main;
+        mainCamera = Camera.main;
     }
 
     private void Update()
     {
         if (Input.GetKeyDown(KeyCode.Space))
         {
-
-            do
-            {
-                var tempgraph = new int[mapHeight, mapWidth];
-                ResetStage();
-                for (int v = 0; v < mapHeight; v++)
-                {
-                    for (int h = 0; h < mapWidth; h++)
-                    {
-                        var id = v * mapWidth + h;
-                        tempgraph[v, h] = map.tiles[id].weight;
-                    }
-                }
-                graph = new Graph();
-                graph.Init(tempgraph);
-
-                var search = new GraphSearch();
-                search.Init(graph);
-                if (search.AStar(graph.nodes[map.startTile.Id], graph.nodes[map.castleTile.Id]) == true)
-                {
-                    break;
-                }
-            } while (true);
-        }
-
-        if(tileObjs != null)
-        {
-            var screenPos = cam.ScreenToWorldPoint(Input.mousePosition);
-            screenPos.z = 0f;
-
-            var tileid = ScreenPosToTileId(screenPos);
-
-            foreach (var tile in tileObjs)
-            {
-                tile.GetComponent<SpriteRenderer>().color = Color.white;
-            }
-
-            if (tileid != -1)
-            {   
-                tileObjs[tileid].GetComponent<SpriteRenderer>().color = Color.green;
-            }
+            ResetStage();
         }
     }
 
@@ -109,9 +75,31 @@ public class Stage : MonoBehaviour
     {
         map = new Map();
         map.Init(mapHeight, mapWidth);
-        map.CreateIsland(erodePercent, erodeIterations, lakePercent, treePercent, hillPercent, mountainPercent, townPercent, monsterPercent);
+        bool success = false;
+        do
+        {
+            success = map.CreateIsland(erodePercent, erodeIteration, lakePercent,
+                treePercent, hillPercent, moutainPercent, townPercent, monsterPercent);
+        }
+        while(!success);
         CreateGrid();
+        DrawPath(map.PathFindingAStar(map.startTile, map.castleTile));
         CreatePlayer();
+    }
+
+    public void DrawPath(List<Tile> path)
+    {
+        foreach (var tile in tileObjs)
+        {
+            tile.GetComponent<SpriteRenderer>().color = Color.white;
+        }
+
+        for (int i = 0; i < path.Count; ++i)
+        {
+            float t = (float)i / (path.Count - 1);
+            tileObjs[path[i].id].GetComponent<SpriteRenderer>().color = 
+                Color.Lerp(Color.green, Color.red, t);
+        }
     }
 
     private void CreatePlayer()
@@ -122,14 +110,14 @@ public class Stage : MonoBehaviour
         }
 
         player = Instantiate(playerPrefab);
-        player.Init(map.startTile.Id);
+        player.Warp(map.startTile.id);
     }
 
     private void CreateGrid()
     {
         if (tileObjs != null)
         {
-            foreach(var tile in tileObjs)
+            foreach (var tile in tileObjs)
             {
                 Destroy(tile.gameObject);
             }
@@ -139,15 +127,14 @@ public class Stage : MonoBehaviour
 
         var position = FirstTilePos;
 
-        for(int i = 0; i < mapHeight; i++)
+        for (int i = 0; i < mapHeight; ++i)
         {
-            for(int j = 0; j < mapWidth; j++)
+            for (int j = 0; j < mapWidth; ++j)
             {
                 var tileId = i * mapWidth + j;
-
                 var newGo = Instantiate(tilePrefabs, transform);
-                newGo.name = $"{tileId}";
                 newGo.transform.position = position;
+                newGo.name = $"({i:D2}, {j:D2})";
                 position.x += tileSize.x;
 
                 tileObjs[tileId] = newGo;
@@ -163,59 +150,90 @@ public class Stage : MonoBehaviour
         var tile = map.tiles[tileId];
         var tileGo = tileObjs[tileId];
         var ren = tileGo.GetComponent<SpriteRenderer>();
-        if(tile.autoTileId != (int)TileTypes.Empty)
+        if (tile.isVisited)
         {
-            //ren.sprite = islandSprites[tile.autoTileId];
-
-            if (tile.isVisited == true)
+            if (tile.autoTileId != (int)TileTypes.Empty)
             {
                 ren.sprite = islandSprites[tile.autoTileId];
             }
             else
             {
-                ren.sprite = fowSprites[tile.autofowTileId];
+                ren.sprite = null;
             }
         }
         else
         {
-            ren.sprite = null;
+            ren.sprite = fowSprites[tile.fowTileId];
         }
     }
 
-    // 1. stage 게임 오브젝트의 포지션이 그리드의 중점이 되도록 수정
-    // 2. 아래 4개 메소드 구현
+    public int visitRadius = 1;
+
+    public void OnTileVisited(int tileId)
+    {
+        OnTileVisited(map.tiles[tileId]);
+    }
+
+    public void OnTileVisited(Tile tile)
+    {
+        int centerX = tile.id % mapWidth;
+        int centerY = tile.id / mapWidth;
+
+        for (int i = -visitRadius; i <= visitRadius; ++i)
+        {
+            for (int j = -visitRadius; j <= visitRadius; ++j)
+            {
+                int x = centerX + j;
+                int y = centerY + i;
+                if (x < 0 || x >= mapWidth || y < 0 || y >= mapHeight)
+                    continue;
+
+                int id = y * mapWidth + x;
+                map.tiles[id].isVisited = true;
+                DecorateTile(id);
+            }
+        }
+
+        var radius = visitRadius + 1;
+        for (int i = -radius; i <= radius; ++i)
+        {
+            for (int j = -radius; j <= radius; ++j)
+            {
+                if (i == -radius || i == radius || j == -radius || j == radius)
+                {
+                    int x = centerX + j;
+                    int y = centerY + i;
+                    if (x < 0 || x >= mapWidth || y < 0 || y >= mapHeight)
+                        continue;
+
+                    int id = y * mapWidth + x;
+                    map.tiles[id].UpdateFowTileId();
+                    DecorateTile(id);
+                }
+            }
+        }
+    }
+
 
     public int ScreenPosToTileId(Vector3 screenPos)
     {
-        screenPos.z = transform.position.z;
-
-        return WorldPosToTileId(screenPos);
+        screenPos.z = Mathf.Abs(transform.position.z - mainCamera.transform.position.z);
+        return WorldPosToTileId(mainCamera.ScreenToWorldPoint(screenPos));
     }
 
     public int WorldPosToTileId(Vector3 worldPos)
     {
-        for (int i = 0; i < mapHeight; i++)
-        {
-            for (int j = 0; j < mapWidth; j++)
-            {
-                var tileId = i * mapWidth + j;
-
-                if (Mathf.Abs(tileObjs[tileId].transform.position.x - worldPos.x) < tileSize.x / 2 && Mathf.Abs(tileObjs[tileId].transform.position.y - worldPos.y) < tileSize.y / 2)
-                return tileId;
-            }
-        }
-
-        return -1;
+        var first = FirstTilePos;
+        int x = Mathf.FloorToInt((worldPos.x - first.x) / tileSize.x + 0.5f);
+        int y = Mathf.FloorToInt((first.y - worldPos.y) / tileSize.y + 0.5f);
+        x = Mathf.Clamp(x, 0, mapWidth - 1);
+        y = Mathf.Clamp(y, 0, mapHeight - 1);
+        return y * mapWidth + x;
     }
 
     public Vector3 GetTilePos(int y, int x)
-    {
-        var tileId = y * mapWidth + x;
-        return GetTilePos(tileId);
-    }
+        => FirstTilePos + new Vector3(x * tileSize.x, -y * tileSize.y);
 
     public Vector3 GetTilePos(int tileId)
-    {
-        return tileObjs[tileId].transform.position;
-    }
+        => GetTilePos(tileId / mapWidth, tileId % mapWidth);
 }
